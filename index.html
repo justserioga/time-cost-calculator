@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#000000">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="format-detection" content="telephone=no">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Time Cost">
+    <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png">
+    <link rel="icon" type="image/png" href="./icon-192.png">
+    <title>Калькулятор времени</title>
+    <style>
+        /* Макет: Figma "RateCalc", фрейм 375 × 667 (iPhone SE 2022).
+           Сетка: поля 22, кнопки 76 × 76, зазор 9. */
+        :root {
+            --c-bg: #000000;
+            --c-pill: #121212;
+            --c-muted: #616161;
+            --c-fn: #616161;
+            --c-num: #353535;
+            --c-op: #ff9201;
+            --c-text: #ffffff;
+            --press: rgba(0, 0, 0, 0.2);
+            --font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: var(--font);
+            font-weight: 400;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            -webkit-touch-callout: none;
+        }
+
+        html, body {
+            background: var(--c-bg);
+            height: 100%;
+            overflow: hidden;
+            overscroll-behavior: none;
+            touch-action: manipulation; /* отключает зум по двойному тапу */
+            -webkit-text-size-adjust: 100%;
+        }
+
+        body {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .app {
+            position: relative;
+            flex: none;
+            width: 375px;
+            height: 667px;
+            background: var(--c-bg);
+        }
+
+        /* ---------- Плашка со ставкой ---------- */
+        .rate-btn {
+            position: absolute;
+            left: 22px;
+            top: 50px;
+            min-width: 137px;
+            height: 42px;
+            padding: 11px 14px 0;
+            border: none;
+            outline: none;
+            border-radius: 21px;
+            background: var(--c-pill);
+            color: var(--c-text);
+            display: inline-flex;
+            align-items: flex-start;
+            justify-content: center;
+            gap: 6px;
+            cursor: pointer;
+            overflow: hidden;
+            touch-action: manipulation;
+        }
+
+        .rate-btn .rate-value { font-size: 20px; line-height: 20px; }
+        .rate-btn .rate-unit  { font-size: 12px; line-height: 12px; margin-top: 6.8px; } /* общая базовая линия с $20.00 */
+
+        /* ---------- Дисплей ---------- */
+        .expression,
+        .main-display,
+        .sub-text {
+            position: absolute;
+            right: 22px;
+            text-align: right;
+            white-space: nowrap;
+        }
+
+        .expression {
+            left: 22px;
+            top: 103px;
+            font-size: 16px;
+            line-height: 16px;
+            height: 16px;
+            color: var(--c-muted);
+        }
+
+        .main-display {
+            top: 126px;
+            font-size: 50px;
+            line-height: 50px;
+            height: 50px;
+            color: var(--c-text);
+        }
+
+        .sub-text {
+            top: 183px;
+            font-size: 24px;
+            line-height: 24px;
+            height: 24px;
+            color: var(--c-muted);
+        }
+
+        /* ---------- Клавиатура ---------- */
+        .grid {
+            position: absolute;
+            left: 22px;
+            top: 229px;
+            display: grid;
+            grid-template-columns: repeat(4, 76px);
+            grid-template-rows: repeat(5, 76px);
+            gap: 9px;
+        }
+
+        .calc-btn {
+            position: relative;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+            height: 100%;
+            border: none;
+            outline: none;
+            border-radius: 38px;
+            padding: 0;
+            font-size: 28px;
+            line-height: 1;
+            color: var(--c-text);
+            cursor: pointer;
+            overflow: hidden;
+            touch-action: manipulation;
+        }
+
+        .calc-btn svg {
+            display: block;
+            pointer-events: none;
+        }
+
+        .btn-fn   { background: var(--c-fn);  grid-column: span 2; }
+        .btn-dark { background: var(--c-num); }
+        .btn-zero { grid-column: span 2; }
+        .btn-op   { background: var(--c-op); }
+        .btn-add-tall { grid-row: span 2; }
+
+        /* Иконки бэкспейса и плюса нарисованы в SVG размером с кнопку,
+           чтобы дробные координаты (63.5 / 71.5) не округлялись браузером */
+
+        /* Активный оператор (ожидает второе число): инверсия цветов */
+        .btn-op.active { background: var(--c-text); color: var(--c-op); }
+
+        /* Нажатие / hover: заливка чёрным 10% поверх кнопки */
+        .calc-btn::after,
+        .rate-btn::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            border-radius: inherit;
+            background: var(--press);
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .calc-btn:active::after,
+        .rate-btn:active::after {
+            opacity: 1;
+        }
+
+        @media (hover: hover) {
+            .calc-btn:hover::after,
+            .rate-btn:hover::after {
+                opacity: 1;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div class="app">
+    <button class="rate-btn" id="rateBtn" onclick="promptRate()" aria-label="Ставка в час">
+        <span class="rate-value" id="rateValue">$0.00</span><span class="rate-unit">USD/h</span>
+    </button>
+
+    <div class="expression" id="expression"><span id="expressionText"></span></div>
+    <div class="main-display" id="display">0.00</div>
+    <div class="sub-text" id="subDisplay">$0.00</div>
+
+    <div class="grid">
+        <button class="calc-btn btn-fn" onclick="pressAC()">AC</button>
+        <button class="calc-btn btn-fn btn-back" onclick="pressBackspace()" aria-label="Стереть">
+            <svg width="161" height="76" viewBox="0 0 161 76" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <g transform="translate(60.5 18)">
+                    <path d="M25.911 15L20.911 20M20.911 20L15.911 25M20.911 20L15.911 15M20.911 20L25.911 25M2.89222 21.7357L8.97752 30.3143C9.72759 31.3717 10.9436 32 12.24 32H30.661C32.3178 32 33.661 30.6569 33.661 29V11C33.661 9.34315 32.3178 8 30.661 8H12.24C10.9436 8 9.72759 8.6283 8.97752 9.6857L2.89222 18.2643C2.15474 19.3039 2.15474 20.6961 2.89222 21.7357Z" stroke-width="2" stroke="currentColor"/>
+                </g>
+            </svg>
+        </button>
+
+        <button class="calc-btn btn-dark" onclick="pressNum('7')">7</button>
+        <button class="calc-btn btn-dark" onclick="pressNum('8')">8</button>
+        <button class="calc-btn btn-dark" onclick="pressNum('9')">9</button>
+        <button class="calc-btn btn-op" id="op-subtract" onclick="setOperator('-')" aria-label="Минус">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M16.0711 9H1.92896" stroke-width="2" stroke="currentColor"/>
+            </svg>
+        </button>
+
+        <button class="calc-btn btn-dark" onclick="pressNum('4')">4</button>
+        <button class="calc-btn btn-dark" onclick="pressNum('5')">5</button>
+        <button class="calc-btn btn-dark" onclick="pressNum('6')">6</button>
+        <button class="calc-btn btn-op btn-add-tall" id="op-add" onclick="setOperator('+')" aria-label="Плюс">
+            <svg width="76" height="161" viewBox="0 0 76 161" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <g transform="translate(29 71.5)">
+                    <path d="M16.0711 9.00002L9.00002 9.00002M9.00002 9.00002L1.92896 9.00002M9.00002 9.00002L9.00002 1.92896M9.00002 9.00002L9.00002 16.0711" stroke-width="2" stroke="currentColor"/>
+                </g>
+            </svg>
+        </button>
+
+        <button class="calc-btn btn-dark" onclick="pressNum('1')">1</button>
+        <button class="calc-btn btn-dark" onclick="pressNum('2')">2</button>
+        <button class="calc-btn btn-dark" onclick="pressNum('3')">3</button>
+
+        <button class="calc-btn btn-dark btn-zero" onclick="pressNum('0')">0</button>
+        <button class="calc-btn btn-dark" onclick="pressNum('00')">00</button>
+        <button class="calc-btn btn-op" id="op-equals" onclick="calculate()" aria-label="Равно">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M16.0711 4.5H1.92896M16.0711 13.5H1.92896" stroke-width="2" stroke="currentColor"/>
+            </svg>
+        </button>
+    </div>
+</div>
+
+<script>
+    // Разделитель часов и минут в большом дисплее (в макете: "21.23").
+    // Если нужен формат "21:23" — поставь ':'.
+    const DISPLAY_SEP = ':';
+
+    let rawDigits = "";
+    let previousMins = null;
+    let currentOperator = null;
+    let isNewInput = true;
+    function readSavedRate() {
+        try {
+            return parseFloat(localStorage.getItem('time_calc_rate')) || 0;
+        } catch (error) {
+            return 0;
+        }
+    }
+    let hourlyRate = readSavedRate();
+
+    const displayEl = document.getElementById('display');
+    const subDisplayEl = document.getElementById('subDisplay');
+    const expressionEl = document.getElementById('expression');
+    const expressionTextEl = document.getElementById('expressionText');
+
+    // История выражения: ['18:29', '+', '2:54', '−', ...] — времена на чётных местах, знаки на нечётных.
+    const HISTORY_TIMES = 4;      // сколько последних времён показывать
+    const EXPR_MAX_WIDTH = 331;   // 375 − 2 × 22
+    let chain = [];
+
+    function opSymbol(op) { return op === '-' ? '\u2212' : op; }
+
+    function setExpression(text) {
+        expressionTextEl.textContent = text;
+        let size = 16;
+        expressionEl.style.fontSize = size + 'px';
+        while (expressionTextEl.offsetWidth > EXPR_MAX_WIDTH && size > 10) {
+            size -= 1;
+            expressionEl.style.fontSize = size + 'px';
+        }
+    }
+
+    function renderExpression(withEquals) {
+        if (!chain.length) { setExpression(''); return; }
+        const timesCount = Math.ceil(chain.length / 2);
+        const start = Math.max(0, (timesCount - HISTORY_TIMES) * 2);
+        let text = chain.slice(start).join(' ');
+        if (start > 0) text = '\u2026 ' + text;
+        if (withEquals) text += ' =';
+        setExpression(text);
+    }
+    const rateValueEl = document.getElementById('rateValue');
+
+    function updateRateButton() {
+        rateValueEl.textContent = `$${hourlyRate.toFixed(2)}`;
+    }
+
+    function promptRate() {
+        const input = prompt("Введите стоимость 1 часа работы ($):", hourlyRate ? hourlyRate : "");
+        if (input !== null) {
+            const parsed = parseFloat(input.replace(',', '.'));
+            if (!isNaN(parsed) && parsed >= 0) {
+                hourlyRate = parsed;
+                try {
+                    localStorage.setItem('time_calc_rate', String(hourlyRate));
+                } catch (error) {
+                    // The calculator still works if browser storage is unavailable.
+                }
+                updateRateButton();
+                updateDisplay();
+            }
+        }
+    }
+
+    function digitsToMinutes(digitsStr) {
+        if (!digitsStr || digitsStr === "0") return 0;
+        const padded = digitsStr.padStart(3, '0');
+        const h = parseInt(padded.slice(0, -2), 10) || 0;
+        const m = parseInt(padded.slice(-2), 10) || 0;
+        return h * 60 + m;
+    }
+
+    function formatTimeDisplay(digitsStr) {
+        if (!digitsStr) return "0:00";
+        const padded = digitsStr.padStart(3, '0');
+        const h = parseInt(padded.slice(0, -2), 10) || 0;
+        const mStr = padded.slice(-2);
+        return `${h}:${mStr}`;
+    }
+
+    function minutesToDigitsStr(totalMins) {
+        const isNegative = totalMins < 0;
+        const absMins = Math.abs(totalMins);
+        const h = Math.floor(absMins / 60);
+        const m = absMins % 60;
+        const mStr = m < 10 ? '0' + m : '' + m;
+        return (isNegative ? "-" : "") + `${h}${mStr}`;
+    }
+
+    function updateDisplay() {
+        const mins = digitsToMinutes(rawDigits);
+
+        if (rawDigits === "") {
+            displayEl.textContent = `0${DISPLAY_SEP}00`;
+        } else {
+            displayEl.textContent = formatTimeDisplay(rawDigits).replace(':', DISPLAY_SEP);
+        }
+
+        const cost = (mins / 60) * hourlyRate;
+        subDisplayEl.textContent = `$${cost.toFixed(2)}`;
+        adjustFontSize();
+    }
+
+    function adjustFontSize() {
+        const len = displayEl.textContent.length;
+        if (len > 8) {
+            displayEl.style.fontSize = "36px";
+        } else if (len > 6) {
+            displayEl.style.fontSize = "44px";
+        } else {
+            displayEl.style.fontSize = "50px";
+        }
+    }
+
+    function pressNum(numStr) {
+        if (isNewInput) {
+            rawDigits = "";
+            isNewInput = false;
+        }
+
+        if (rawDigits.length >= 7) return;
+        if (rawDigits === "" && (numStr === "0" || numStr === "00")) return;
+
+        rawDigits += numStr;
+        updateDisplay();
+        highlightOperator(null);
+    }
+
+    function pressBackspace() {
+        if (isNewInput) return;
+        rawDigits = rawDigits.slice(0, -1);
+        updateDisplay();
+    }
+
+    function pressAC() {
+        rawDigits = "";
+        previousMins = null;
+        currentOperator = null;
+        isNewInput = true;
+        chain = [];
+        renderExpression(false);
+        updateDisplay();
+        highlightOperator(null);
+    }
+
+    function setOperator(op) {
+        const currentMins = digitsToMinutes(rawDigits);
+        const lastIsOperator = chain.length > 0 && chain.length % 2 === 0;
+
+        if (lastIsOperator && isNewInput) {
+            // Второй раз подряд нажали знак — просто меняем его
+            chain[chain.length - 1] = opSymbol(op);
+        } else {
+            chain.push(formatTimeDisplay(rawDigits || "0"), opSymbol(op));
+        }
+
+        if (previousMins !== null && !isNewInput && currentOperator) {
+            calculateIntermediate();
+        } else {
+            previousMins = currentMins;
+        }
+
+        currentOperator = op;
+        isNewInput = true;
+
+        renderExpression(false);
+        highlightOperator(op);
+    }
+
+    function calculateIntermediate() {
+        const currentMins = digitsToMinutes(rawDigits);
+        if (currentOperator === '+') {
+            previousMins += currentMins;
+        } else if (currentOperator === '-') {
+            previousMins -= currentMins;
+        }
+        rawDigits = minutesToDigitsStr(previousMins);
+        updateDisplay();
+    }
+
+    function calculate() {
+        if (currentOperator === null || previousMins === null) return;
+
+        // Знак нажат, а второе число не введено: ничего не считаем,
+        // просто завершаем выражение и оставляем на дисплее текущее значение.
+        if (isNewInput) {
+            if (chain.length % 2 === 0) chain.pop(); // убираем висящий знак
+            renderExpression(true);
+            previousMins = null;
+            currentOperator = null;
+            chain = [];
+            highlightOperator(null);
+            return;
+        }
+
+        const currentMins = digitsToMinutes(rawDigits);
+        const op = currentOperator;
+        chain.push(formatTimeDisplay(rawDigits || "0"));
+
+        let resultMins = 0;
+        if (op === '+') {
+            resultMins = previousMins + currentMins;
+        } else if (op === '-') {
+            resultMins = previousMins - currentMins;
+        }
+
+        renderExpression(true);
+        rawDigits = minutesToDigitsStr(resultMins);
+        updateDisplay();
+
+        previousMins = null;
+        currentOperator = null;
+        isNewInput = true;
+        chain = [];
+        highlightOperator(null);
+    }
+
+    function highlightOperator(op) {
+        document.getElementById('op-add').classList.remove('active');
+        document.getElementById('op-subtract').classList.remove('active');
+        if (op === '+') document.getElementById('op-add').classList.add('active');
+        if (op === '-') document.getElementById('op-subtract').classList.add('active');
+    }
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key >= '0' && e.key <= '9') {
+            pressNum(e.key);
+        } else if (e.key === '+') {
+            setOperator('+');
+        } else if (e.key === '-') {
+            setOperator('-');
+        } else if (e.key === 'Enter' || e.key === '=') {
+            e.preventDefault();
+            calculate();
+        } else if (e.key === 'Backspace') {
+            pressBackspace();
+        } else if (e.key === 'Escape' || e.key.toLowerCase() === 'c') {
+            pressAC();
+        }
+    });
+
+    // Запрет зума: щипок и двойной тап (iOS Safari / PWA)
+    ['gesturestart', 'gesturechange', 'gestureend'].forEach(function (name) {
+        document.addEventListener(name, function (e) { e.preventDefault(); });
+    });
+    document.addEventListener('dblclick', function (e) { e.preventDefault(); });
+
+    // Optional haptic feedback where the browser exposes the Vibration API.
+    // iPhone Safari may not support this API; visual press feedback remains enabled.
+    function tryHapticFeedback() {
+        if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+            try { navigator.vibrate(8); } catch (error) {}
+        }
+    }
+
+    document.querySelector('.app').addEventListener('click', function (event) {
+        if (event.target.closest('button')) tryHapticFeedback();
+    });
+
+    // Register the offline cache when served from HTTPS (e.g. GitHub Pages).
+    if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+        window.addEventListener('load', function () {
+            navigator.serviceWorker.register('./service-worker.js').catch(function () {});
+        });
+    }
+
+    updateRateButton();
+    updateDisplay();
+</script>
+
+</body>
+</html>
